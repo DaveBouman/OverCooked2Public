@@ -1,5 +1,9 @@
-from concurrent.futures import process, thread
+from cgitb import grey
+from concurrent.futures import thread
 from enum import Enum
+from multiprocessing.dummy import Process
+from multiprocessing.pool import ThreadPool
+from multiprocessing.spawn import prepare
 from operator import attrgetter
 import threading
 from unicodedata import category
@@ -11,14 +15,12 @@ import time
 from matplotlib import pyplot as plt
 from main import Player
 from threading import Thread
-from multiprocessing import Pool, cpu_count
+import queue
 
 screen = {'left': 3960, 'top': 1555, 'width': 1920, 'height': 1080}
 player = Player()
 
-
-def lolol():
-    print('this')
+que = queue.Queue()
 
 
 class ComputerVision:
@@ -29,76 +31,186 @@ class ComputerVision:
     platePositions = []
     count = 0
     dishText = 'none'
-    plates = {}
-    products = {}
+    utensils = {}
+    ingredients = {}
+    npcs = {}
+    dishes = {}
+    foods = {}
+    playerLocation = [0, 0]
+    holding = ''
 
-    def getDishPositions(self, screenshot, provisions):
+    def createThreadsToFindDishes(self, screenshot, provisions):
         self.count += 1
-        pool = Pool(processes=(cpu_count() - 1))
-
         for i, provision in enumerate(provisions):
-            pool.apply_async(lolol)
+            self.getDishes(screenshot, provision, i)
 
-        pool.close()
-        pool.join()
-        # if threading.active_count() == 1 and self.count % 5 == 0:
+    def getDishes(self, screenshot, provision, i):
 
-        #     if provision.category == "food":
-        #         self.createDish(i, points, provision,
-        #                         dishesToPrepareRanked, choppingBlock, self.products, self.plates)
+        image = np.array(provision.image)
+        image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+        image.shape
+        image = cv.resize(image, (int(image.shape[1] / 4), int(image.shape[0] / 4)),
+                          interpolation=cv.INTER_AREA)
+        result = cv.matchTemplate(
+            screenshot, image, cv.TM_CCOEFF_NORMED)
 
-    def getProducts(self, points):
-        locationx2 = round((points[0][0] - 360) / 90) - 1
-        locationy2 = round((points[0][1] - 171) / 90) - 1
+        needleW = provision.image.shape[1]
+        needleH = provision.image.shape[0]
 
-        return [locationy2, locationx2]
+        threshold = provision.threshold
+        locations = np.where(result >= threshold)
+        locations = list(zip(*locations[::-1]))
+
+        rectangles = []
+
+        for location in locations:
+            rectangle = [int(location[0]), int(
+                location[1]), needleW, needleH]
+
+            rectangles.append(rectangle)
+            rectangles.append(rectangle)
+
+        rectangles, weights = cv.groupRectangles(
+            rectangles, groupThreshold=1, eps=0.5)
+
+        points = []
+
+        if len(rectangles):
+
+            dishesToPrepareRanked = []
+
+            for (x, y, w, h) in rectangles:
+
+                centerX = x + int((w/2) / 4)
+                centerY = y + int((h/2) / 4)
+
+                points.append((centerX, centerY))
+
+                if provision.category == "utensil":
+                    self.utensils |= {
+                        provision.name: self.getPlatePositions(points)}
+
+                    cv.drawMarker(screenshot, (centerX, centerY),
+                                  color=(255, 0, 255), markerType=cv.MARKER_CROSS,
+                                  markerSize=10, thickness=1)
+
+                if provision.category == "ingredient":
+                    self.ingredients |= {
+                        provision.name: self.getIngredient(points)}
+
+                    cv.drawMarker(screenshot, (centerX, centerY),
+                                  color=(255, 0, 255), markerType=cv.MARKER_CROSS,
+                                  markerSize=10, thickness=1)
+
+                if provision.category == "food":
+                    self.foods |= {
+                        provision.name: self.getIngredient(points)}
+
+                    cv.drawMarker(screenshot, (centerX, centerY),
+                                  color=(255, 0, 255), markerType=cv.MARKER_CROSS,
+                                  markerSize=10, thickness=1)
+
+                if provision.category == "dish":
+                    self.dishes |= {
+                        provision.name: self.getIngredient(points)}
+
+                    cv.drawMarker(screenshot, (centerX, centerY),
+                                  color=(255, 0, 255), markerType=cv.MARKER_CROSS,
+                                  markerSize=10, thickness=1)
+
+                if provision.category == "holding":
+                    holding = provision.name
+
+                    cv.drawMarker(screenshot, (centerX, centerY),
+                                  color=(255, 0, 255), markerType=cv.MARKER_CROSS,
+                                  markerSize=10, thickness=1)
+
+                if threading.active_count() == 1 and self.count % 50 == 0:
+
+                    self.createDish(self.ingredients,
+                                    self.utensils, self.dishes, self.foods)
+
+    def createDish(self, ingredients, utensils, dishes, foods):
+        thread = Thread(target=player.prepareFood,
+                        args=([ingredients, utensils, dishes, foods, self.playerLocation, que]))
+        thread.start()
+
+    def getPlayerLocation(self, points):
+        locationx = round((points[0] - (390 / 4)) / (90 / 4)) - 1
+        locationy = round((points[1] - (171 / 4)) / (90 / 4)) - 1
+
+        return [locationy, locationx]
+
+    def getIngredient(self, points):
+        locationx = round((points[0][0] - (390 / 4)) / (90 / 4)) - 1
+        locationy = round((points[0][1] - (171 / 4)) / (90 / 4)) - 1
+
+        return [locationy, locationx]
 
     def getPlatePositions(self, points):
-        locationx = round((points[0][0] - 360) / 90) - 1
-        locationy = round((points[0][1] - 171) / 90) - 1
+        locationx = round((points[0][0] - (390 / 4)) / (90 / 4)) - 1
+        locationy = round((points[0][1] - (171 / 4)) / (90 / 4)) - 1
 
         return [locationy, locationx]
 
-    def getChoppingBlockPosition(self, points):
-        locationx = round((points[0][0] - 360) / 90) - 1
-        locationy = round((points[0][1] - 171) / 90) - 1
+    def getCuttingBlockPosition(self, points):
+        locationx = round((points[0][0] - (390 / 4)) / (90 / 4)) - 1
+        locationy = round((points[0][1] - (171 / 4)) / (90 / 4)) - 1
 
         return [locationy, locationx]
 
-    def createDish(self, i, points, dish, dishesToPrepareRanked, choppingBlock, products, plates):
-        self.dishesToPrepare[i] = [points, dish.name]
+    def hsvView(self, screenshot):
+        hsv = cv.cvtColor(screenshot, cv.COLOR_BGR2HSV)
+        lower = np.array([42, 180, 220])
+        upper = np.array([120, 255, 255])
+        mask = cv.inRange(hsv, lower, upper)
+        result = cv.bitwise_and(
+            screenshot, screenshot, mask=mask)
+        indices = np.nonzero(result)
+        cv.imshow('hsv', result)
 
-        tmp = min(self.dishesToPrepare2,
-                  key=self.dishesToPrepare2.get)
+        try:
+            mean = int(np.mean(indices[0]))
+            mean2 = int(np.mean(indices[1]))
+        except:
+            mean = 180
+            mean2 = 220
 
-        if tmp == "fish":
-            print(tmp)
-            thread2 = Thread(target=player.prepareFish,
-                             args=([plates['plate'], products['fish'], choppingBlock]))
-            thread2.start()
+        font = cv.FONT_HERSHEY_SIMPLEX
+        org = (25, 25)
+        fontScale = 1
+        color = (255, 255, 255)
+        thickness = 2
+        markerColor = (255, 0, 255)
+        markerType = cv.MARKER_CROSS
 
-        if tmp == "shrimp":
-            print(tmp)
-            thread2 = Thread(target=player.prepareShrimp,
-                             args=([plates['plate'], products['shrimp'], choppingBlock]))
-            thread2.start()
+        self.playerLocation = self.getPlayerLocation([mean2, mean])
+        if que.empty():
+            que.put(self.playerLocation)
+
+        cv.putText(screenshot, str(int(self.playerLocation[0])) + ',' + str(int(self.playerLocation[1])), org, font,
+                   fontScale, color, thickness, cv.LINE_AA)
+        cv.drawMarker(screenshot, (int(mean2), int(mean)),
+                      color=markerColor, markerType=markerType,
+                      markerSize=20, thickness=2)
 
 
-fishImage = cv.imread('fishDish.jpg', cv.IMREAD_UNCHANGED)
-shrimpImage = cv.imread('shrimpDish.jpg', cv.IMREAD_UNCHANGED)
-plateImage = cv.imread('plate.png', cv.IMREAD_UNCHANGED)
+fish = cv.imread('./foods/fish.jpg', cv.IMREAD_UNCHANGED)
+seaweed = cv.imread('./foods/seaweed.jpg', cv.IMREAD_UNCHANGED)
+rice = cv.imread('./foods/rice.jpg', cv.IMREAD_UNCHANGED)
 
-leftImage = cv.imread('leftView.jpg', cv.IMREAD_UNCHANGED)
-rightImage = cv.imread('rightView.jpg', cv.IMREAD_UNCHANGED)
-frontImage = cv.imread('frontView.jpg', cv.IMREAD_UNCHANGED)
-backImage = cv.imread('backView.jpg', cv.IMREAD_UNCHANGED)
+fishIngredient = cv.imread('./ingredients/fish.jpg', cv.IMREAD_UNCHANGED)
+seaweedIngredient = cv.imread('./ingredients/seaweed.jpg', cv.IMREAD_UNCHANGED)
+riceIngredient = cv.imread('./ingredients/rice.jpg', cv.IMREAD_UNCHANGED)
 
-plate2Image = cv.imread('plate2.png', cv.IMREAD_UNCHANGED)
+cuttingBoard = cv.imread('./utensils/cuttingBoard.jpg', cv.IMREAD_UNCHANGED)
+pan = cv.imread('./utensils/pan.jpg', cv.IMREAD_UNCHANGED)
+plate = cv.imread('./utensils/plate.jpg', cv.IMREAD_UNCHANGED)
+theExit = cv.imread('./utensils/exit.jpg', cv.IMREAD_UNCHANGED)
 
-fishProductImage = cv.imread('fishProduct.png', cv.IMREAD_UNCHANGED)
-shrimpProductImage = cv.imread('shrimpProduct.png', cv.IMREAD_UNCHANGED)
+sushi = cv.imread('./dishes/sushi.jpg', cv.IMREAD_UNCHANGED)
 
-choppingBlock = cv.imread('choppingBlock.jpg', cv.IMREAD_UNCHANGED)
+holdingRice = cv.imread('./holding/rice.jpg', cv.IMREAD_UNCHANGED)
 
 computerVision = ComputerVision()
 
@@ -111,46 +223,50 @@ class Provision:
         self.threshold = threshold
 
 
-def main():
-    with mss() as sct:
-        frameCounter = 0
+class Main:
+    screenshot = None
 
-        provisions = [Provision(plateImage, 'cleanPlate', 'plate', 0.65),
-                      #   Provision(plate2Image, 'cleanPlate', 'plate', 0.80),
-                      #   Provision(choppingBlock, 'choppingBlock',
-                      #             'preparation', 0.80),
-                      #   Provision(fishImage, 'fish', 'food', 0.80),
-                      #   Provision(shrimpImage, 'shrimp', 'food', 0.80),
-                      #   Provision(fishProductImage, 'fish', 'product', 0.80),
-                      #   Provision(shrimpProductImage, 'shrimp', 'product', 0.80),
-                      #   Provision(leftImage, 'shrimp', 'product', 0.60),
-                      #   Provision(rightImage, 'shrimp', 'product', 0.60),
-                      #   Provision(frontImage, 'shrimp', 'product', 0.60),
-                      #   Provision(backImage, 'shrimp', 'product', 0.60)
+    def start(self):
+        with mss() as sct:
+            frameCounter = 0
+            provisions = [
+                Provision(fishIngredient, 'fish', 'ingredient', 0.85),
+                Provision(seaweedIngredient, 'seaweed', 'ingredient', 0.80),
+                Provision(riceIngredient, 'rice', 'ingredient', 0.85),
+
+                Provision(pan, 'pan', 'utensil', 0.80),
+                Provision(cuttingBoard, 'cuttingBoard', 'utensil', 0.90),
+                Provision(plate, 'plate', 'utensil', 0.90),
+                Provision(theExit, 'exit', 'utensil', 0.80),
+
+                Provision(sushi, 'sushi', 'dish', 0.90),
+
+                Provision(holdingRice, 'rice', 'holding', 0.80)
+            ]
+
+            while True:
+                frameCounter += 1
+                self.screenshot = sct.grab(screen)
+                self.screenshot = np.array(self.screenshot)
+                self.screenshot = cv.resize(self.screenshot, (int(self.screenshot.shape[1] / 4), int(self.screenshot.shape[0] / 4)),
+                                            interpolation=cv.INTER_AREA)
+                computerVision.hsvView(self.screenshot)
+                self.screenshot = cv.cvtColor(
+                    self.screenshot, cv.COLOR_BGR2GRAY)
+                computerVision.createThreadsToFindDishes(
+                    self.screenshot, provisions)
+
+                self.screenshot = cv.resize(self.screenshot, (1920, 1080),
+                                            interpolation=cv.INTER_AREA)
+                cv.imshow('Totally Awesome AI', self.screenshot)
+                if cv.waitKey(1) == ord('q'):
+                    cv.destroyAllWindows()
+                    break
 
 
-                      ]
-        while True:
-            frameCounter += 1
-            screenshot = sct.grab(screen)
-            screenshot = Image.frombytes(
-                mode="RGB",
-                size=(screenshot.width, screenshot.height),
-                data=screenshot.rgb,
-            )
-            screenshot = np.flip(screenshot, axis=-1)
-            screenshot = np.array(screenshot)
-            computerVision.getDishPositions(screenshot, provisions)
-            cv.imshow('Totally Awesome AI', screenshot)
+main = Main()
 
-            if cv.waitKey(1) == ord('q'):
-                cv.destroyAllWindows()
-                break
-
-
-# thread1 = Thread(target=main)
-
-# thread1.start()
-main()
-cv.destroyAllWindows()
-print('destroyed')
+if __name__ == '__main__':
+    main.start()
+    cv.destroyAllWindows()
+    print('destroyed')

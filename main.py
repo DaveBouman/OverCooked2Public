@@ -175,18 +175,19 @@ def search(grid, cost, start, end):
 
 class Player(Thread):
     cost = 1
-    grid = [[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            [1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1],
-            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]]
+    grid = [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]]
 
     def pressMovementKeys(self, directions):
         for direction in directions:
             pyautogui.keyDown(direction[1])
-            time.sleep(0.0928)
+            time.sleep(0.0899)
             pyautogui.keyUp(direction[1])
 
     def pressMovementKey(self, direction):
@@ -226,16 +227,17 @@ class Player(Thread):
 
     def goTo(self, start, end):
         path = search(self.grid, self.cost, start, end)
-        self.pressMovementKeys(path[1])
-        lastIndex = [index[-1] for index in path]
-        if lastIndex[1][0] == 1:  # S
-            end[0] = end[0] - 1
-        elif lastIndex[1][0] == 2:  # W
-            end[0] = end[0] + 1
-        elif lastIndex[1][0] == 3:  # A
-            end[1] = end[1] + 1
-        elif lastIndex[1][0] == 4:  # D
-            end[1] = end[1] - 1
+        if path[1]:
+            self.pressMovementKeys(path[1])
+            lastIndex = [index[-1] for index in path]
+            if lastIndex[1][0] == 1:  # S
+                end[0] = end[0] - 1
+            elif lastIndex[1][0] == 2:  # W
+                end[0] = end[0] + 1
+            elif lastIndex[1][0] == 3:  # A
+                end[1] = end[1] + 1
+            elif lastIndex[1][0] == 4:  # D
+                end[1] = end[1] - 1
         return end
 
     def prepareFish(self, plateLocation, productLocation, choppingBlockLocation):
@@ -255,19 +257,31 @@ class Player(Thread):
         self.GrabPlaceItem()
         self.goToStart()
 
-    def prepareShrimp(self, plateLocation, productLocation, choppingBlockLocation):
-        start = [0, 1]
-        self.goTo(start, productLocation)
+    def checkLocation(self, que, goToObject, message):
+        playerLocation = que.get()
+        playerLocation = que.get()
+        playerLocation = que.get()
+        location = self.goTo(playerLocation, goToObject)
+        playerLocation = que.get()
+        playerLocation = que.get()
+        playerLocation = que.get()
+        while playerLocation[0] is not location[0] and playerLocation[1] is not location[1]:
+            playerLocation = que.get()
+            playerLocation = que.get()
+            playerLocation = que.get()
+            location = self.goTo(playerLocation, goToObject)
+            playerLocation = que.get()
+            playerLocation = que.get()
+            playerLocation = que.get()
+            playerLocation = que.get()
+        time.sleep(0.1)
         self.GrabPlaceItem()
+        print(message)
 
-        location = self.goTo(productLocation, choppingBlockLocation)
-        self.cutItem()
-        self.GrabPlaceItem()
-
-        location = self.goTo(location, plateLocation)
-        self.GrabPlaceItem()
-        self.GrabPlaceItem()
-
-        location = self.goTo(location, [2, 12])
-        self.GrabPlaceItem()
-        self.goToStart()
+    def prepareFood(self, ingredients, utensils, dishes, foods, playerLocation, que):
+        self.checkLocation(que, ingredients['rice'], 'rice')
+        self.checkLocation(que,  utensils['pan'], 'pan')
+        self.checkLocation(que, ingredients['seaweed'], 'seaweed')
+        self.checkLocation(que, utensils['plate'], 'plate')
+        self.checkLocation(que,  utensils['pan'], 'pan')
+        self.checkLocation(que, utensils['plate'], 'plate')
